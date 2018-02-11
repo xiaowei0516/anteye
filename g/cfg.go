@@ -13,9 +13,16 @@ type HttpConfig struct {
 }
 
 type MailConfig struct {
-	Enable    bool   `json:"enable"`
-	Url       string `json:"url"`
-	Receivers string `json:"receivers"`
+	Enable bool `json:"enable"`
+
+	MailServer    string `json:"mailServer"`
+	MailPort      int    `json:"mailPort"`
+	MailUser      string `json:"mailUser"`
+	MailPassword  string `json:"mailPassword"`
+	MailFrom      string `json:"mailFrom"`
+	MailReceivers string `json:"mailReceivers"`
+	MailCount     int    `json:"mailCount"`
+	MailReCount   int    `json:"mailReCount"`
 }
 
 type SmsConfig struct {
@@ -30,7 +37,8 @@ type CallbackConfig struct {
 }
 
 type MonitorConfig struct {
-	Cluster []string `json:"cluster"`
+	Cluster   []string `json:"cluster"`
+	PortCheck []string `json:"portCheck"`
 }
 
 type GlobalConfig struct {

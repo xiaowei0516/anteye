@@ -6,8 +6,14 @@
     },
     "mail" : {
         "enable": true,
-        "url" : "http://mail.server:1986/mail/sender",
-        "receivers" : "nieanan@xiaomi.com,niean.sail@gmail.com"
+        "mailServer": "smtp.mail.com",
+        "mailPort":465,
+        "mailUser":"test@mail.com",
+        "mailPassword":"O#2017",
+        "mailFrom":"test01p@mail.com",
+        "mailCount": 20,
+        "mailReCount": 3,
+        "mailReceivers" : "zhangxiaowei@mail.com"
     },
     "sms" : {
         "enable": false,
@@ -20,9 +26,17 @@
     },
     "monitor" : {
         "cluster" : [
-            "transfer,test.hostname01:6060/health",
-            "task,test.hostname01:8002/health",
-            "graph,test.hostname01:6071/health"
+            "hbs,http://10.21.199.185:6031/health",
+            "alarm,http://10.21.199.185:9912/health",
+            "graph,http://10.21.199.185:6071/health",
+            "transfer,http://10.21.199.185:6060/health",
+            "judge,http://10.21.199.185:6081/health",
+            "nodata,http://10.21.199.185:6090/health"
+        ],
+        "portCheck":[
+            "nginx,127.0.0.1:3306,tcp",
+            "test,10.21.1.200:8080,tcp",
+            "mysql,10.21.1.214:3306,tcp"
         ]
     }
 }

@@ -1,12 +1,13 @@
 package monitor
 
 import (
-	"bytes"
-	"fmt"
+	//"bytes"
+	//"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
-	"os"
+	//"os"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,8 @@ import (
 	ntime "github.com/niean/gotools/time"
 
 	"github.com/niean/anteye/g"
+	. "github.com/niean/anteye/modle"
+	"github.com/niean/anteye/notice"
 )
 
 var (
@@ -29,7 +32,28 @@ var (
 	alarmCache  = nmap.NewSafeMap()
 )
 
+func GetMonitorOrPortcheck() map[string]string {
+	checkCache := make(map[string]string)
+	if len(statusCache.Keys()) == 0 {
+		return checkCache
+	}
+
+	for _, key := range statusCache.Keys() {
+		master := strings.Split(key, ",")[0]
+		s, found := statusCache.Get(key)
+		if !found {
+			checkCache[master] = "err"
+			continue
+		}
+		ss := s.(*Status)
+		checkCache[master] = ss.Status
+	}
+	return checkCache
+}
+
 func Start() {
+	notice.NoticeServer.StartWork()
+
 	monitorCron.AddFuncCC(cronSpec, func() { monitor() }, 1)
 	monitorCron.Start()
 	go alarmJudge()
@@ -41,126 +65,111 @@ func alarmJudge() {
 	interval := time.Duration(10) * time.Second
 	for {
 		time.Sleep(interval)
-		var content bytes.Buffer
 
 		keys := alarmCache.Keys()
 		if len(keys) == 0 {
 			continue
 		}
+
 		for _, key := range keys {
 			aitem, found := alarmCache.GetAndRemove(key)
 			if !found {
 				continue
 			}
-			content.WriteString(aitem.(*Alarm).String() + "\n")
+			notice.NoticeServer.SendAlert(aitem.(*Alarm))
 		}
 
-		if content.Len() < 6 {
-			return
-		}
-
-		cfg := g.Config()
-		// mail
-		if cfg.Mail.Enable {
-			hn, _ := os.Hostname()
-			mailContent := formAlarmMailContent(cfg.Mail.Receivers, "AntEye.Alarm.From.["+hn+"]",
-				content.String(), "AntEye")
-			err := sendMail(cfg.Mail.Url, mailContent)
-			if err != nil {
-				log.Println("alarm send mail error, mail:", mailContent, "", err)
-			} else {
-				// statistics
-				pfc.Meter("MonitorAlarmMail", 1)
+		/*
+			for _, key := range keys {
+				aitem, found := alarmCache.GetAndRemove(key)
+				if !found {
+					continue
+				}
+				content.WriteString(aitem.(*Alarm).String() + "\n")
 			}
-		}
 
-		// sms
-		if cfg.Sms.Enable {
-			smsContent := formAlarmSmsContent(cfg.Sms.Receivers, content.String(), "AntEye")
-			err := sendSms(cfg.Sms.Url, smsContent)
-			if err != nil {
-				log.Println("alarm send sms error, sms:", smsContent, "", err)
-			} else {
-				// statistics
-				pfc.Meter("MonitorAlarmSms", 1)
+			if content.Len() < 6 {
+				return
 			}
-		}
 
-		// callback
-		if cfg.Callback.Enable {
-			cbc := content.String()
-			err := alarmCallback(cfg.Callback.Url, cbc)
-			if err != nil {
-				log.Println("alarm callback error, callback:", cfg.Callback, ", content:", cbc, "", err)
-			} else {
-				// statistics
-				pfc.Meter("MonitorAlarmCallback", 1)
-			}
-		}
+			cfg := g.Config()
+			// mail
+			if cfg.Mail.Enable {
+				hn, _ := os.Hostname()
+				mailContent := formAlarmMailContent(cfg.Mail.Receivers, "Opsultra-anteye.From.["+hn+"]",
+					content.String(), "AntEye")
+				err := sendMail(cfg.Mail.Url, mailContent)
+				if err != nil {
+					log.Println("alarm send mail error, mail:", mailContent, "", err)
+				} else {
+					// statistics
+					pfc.Meter("MonitorAlarmMail", 1)
+				}
+			}*/
 	}
 }
 
-func formAlarmMailContent(tos string, subject string, content string, from string) string {
-	return fmt.Sprintf("tos=%s&subject=%s&content=%s&user=%s", tos, subject, content, from)
-}
-
-func sendMail(mailUrl string, content string) error {
-	client := nhttpclient.GetHttpClient("monitor.mail", 5*time.Second, 10*time.Second)
-	// send by http-post
-	req, err := http.NewRequest("POST", mailUrl, bytes.NewBufferString(content))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-	req.Header.Set("Connection", "close")
-	postResp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer postResp.Body.Close()
-
-	if postResp.StatusCode/100 != 2 {
-		return fmt.Errorf("Http-Post Error, Code %d", postResp.StatusCode)
-	}
-	return nil
-}
-
-func formAlarmSmsContent(tos string, content string, from string) string {
-	return fmt.Sprintf("tos=%s&content=%s&from=%s", tos, content, from)
-}
-
-func sendSms(smsUrl string, content string) error {
-	client := nhttpclient.GetHttpClient("monitor.sms", 5*time.Second, 10*time.Second)
-	// send by http-post
-	req, err := http.NewRequest("POST", smsUrl, bytes.NewBufferString(content))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-	req.Header.Set("Connection", "close")
-	postResp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer postResp.Body.Close()
-
-	if postResp.StatusCode/100 != 2 {
-		return fmt.Errorf("Http-Post Error, Code %d", postResp.StatusCode)
-	}
-	return nil
-}
-
-func alarmCallback(caUrl string, content string) error {
-	client := nhttpclient.GetHttpClient("monitor.callback", 5*time.Second, 10*time.Second)
-	// send by http-post
-	req, err := http.NewRequest("POST", caUrl, bytes.NewBufferString(content))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-	req.Header.Set("Connection", "close")
-	postResp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer postResp.Body.Close()
-
-	if postResp.StatusCode/100 != 2 {
-		return fmt.Errorf("Http-Post Error, Code %d", postResp.StatusCode)
-	}
-	return nil
-}
+//func formAlarmMailContent(tos string, subject string, content string, from string) string {
+//	return fmt.Sprintf("tos=%s&subject=%s&content=%s&user=%s", tos, subject, content, from)
+//}
+//
+//func sendMail(mailUrl string, content string) error {
+//	client := nhttpclient.GetHttpClient("monitor.mail", 5*time.Second, 10*time.Second)
+//	// send by http-post
+//	req, err := http.NewRequest("POST", mailUrl, bytes.NewBufferString(content))
+//	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+//	req.Header.Set("Connection", "close")
+//	postResp, err := client.Do(req)
+//	if err != nil {
+//		return err
+//	}
+//	defer postResp.Body.Close()
+//
+//	if postResp.StatusCode/100 != 2 {
+//		return fmt.Errorf("Http-Post Error, Code %d", postResp.StatusCode)
+//	}
+//	return nil
+//}
+//
+//func formAlarmSmsContent(tos string, content string, from string) string {
+//	return fmt.Sprintf("tos=%s&content=%s&from=%s", tos, content, from)
+//}
+//
+//func sendSms(smsUrl string, content string) error {
+//	client := nhttpclient.GetHttpClient("monitor.sms", 5*time.Second, 10*time.Second)
+//	// send by http-post
+//	req, err := http.NewRequest("POST", smsUrl, bytes.NewBufferString(content))
+//	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+//	req.Header.Set("Connection", "close")
+//	postResp, err := client.Do(req)
+//	if err != nil {
+//		return err
+//	}
+//	defer postResp.Body.Close()
+//
+//	if postResp.StatusCode/100 != 2 {
+//		return fmt.Errorf("Http-Post Error, Code %d", postResp.StatusCode)
+//	}
+//	return nil
+//}
+//
+//func alarmCallback(caUrl string, content string) error {
+//	client := nhttpclient.GetHttpClient("monitor.callback", 5*time.Second, 10*time.Second)
+//	// send by http-post
+//	req, err := http.NewRequest("POST", caUrl, bytes.NewBufferString(content))
+//	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+//	req.Header.Set("Connection", "close")
+//	postResp, err := client.Do(req)
+//	if err != nil {
+//		return err
+//	}
+//	defer postResp.Body.Close()
+//
+//	if postResp.StatusCode/100 != 2 {
+//		return fmt.Errorf("Http-Post Error, Code %d", postResp.StatusCode)
+//	}
+//	return nil
+//}
 
 // status calc
 func monitor() {
@@ -174,6 +183,15 @@ func monitor() {
 	pfc.Gauge("MonitorCronTs", endTs-startTs)
 }
 
+func checkReach(proto, addr string) bool {
+	c, err := net.DialTimeout(proto, addr, time.Duration(10)*time.Second)
+	if err == nil {
+		c.Close()
+		return true
+	} else {
+		return false
+	}
+}
 func _monitor() {
 	client := nhttpclient.GetHttpClient("monitor.get", 5*time.Second, 10*time.Second)
 	for _, host := range g.Config().Monitor.Cluster {
@@ -203,6 +221,28 @@ func _monitor() {
 			onMonitorErr(host)
 		} else { // get "ok"
 			onMonitorOk(host)
+		}
+	}
+
+	for _, portcheck := range g.Config().Monitor.PortCheck {
+		portinfo := strings.Split(portcheck, ",")
+		if len(portinfo) != 3 {
+			continue
+		}
+		porturl := portinfo[1]
+		if !strings.Contains(porturl, ":") {
+			porturl = porturl + ":80"
+		}
+		proto := portinfo[2]
+		if proto != "tcp" && proto != "udp" {
+			continue
+		}
+
+		istcpConn := checkReach(proto, porturl)
+		if istcpConn {
+			onMonitorOk(portcheck)
+		} else {
+			onMonitorErr(portcheck)
 		}
 	}
 }
@@ -298,18 +338,6 @@ func (s *Status) IsTurnToOk() bool {
 	return ret
 }
 
-// AlarmItem Struct
-type Alarm struct {
-	ObjName   string
-	AlarmType string
-	AlarmCnt  int
-	Ts        int64
-}
-
 func NewAlarm(obj string, atype string, cnt int) *Alarm {
 	return &Alarm{AlarmType: atype, ObjName: obj, AlarmCnt: cnt, Ts: time.Now().Unix()}
-}
-
-func (a *Alarm) String() string {
-	return fmt.Sprintf("[%s][%s][%d][%s]", ntime.FormatTs(a.Ts), a.AlarmType, a.AlarmCnt, a.ObjName)
 }
