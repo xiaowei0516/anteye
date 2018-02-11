@@ -2,6 +2,10 @@
 anteye is a small and simple monitor system. anteye should monitor cluster less then 50 instances. it can send notice msgs via **mail**、**sms** or **callback(TODO)**.  
 we suggest you deploy more than one anteye instances in the production environment.
 
+## 修改
+1. 增加udp,tcp端口探测
+2. 增加mail proxy
+
 ## install
 
 You can install anteye from the latest [release](https://github.com/niean/anteye/releases/download/v0.0.2/tycs-anteye-0.0.2.tar.gz),
